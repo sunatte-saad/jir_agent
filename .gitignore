@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+
+# Environments
+.env
+.env.*
+.venv/
+venv/
+pip-wheel-metadata/
+
+# Build / Dist
+build/
+dist/
+wheelhouse/
+*.whl
+*.spec
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Type checking / Linters / Caches
+.mypy_cache/
+.pytype/
+.ruff_cache/
+.pyright/
+
+# IDE / Editors
+.vscode/
+.idea/
+*.code-workspace
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Requests / Temp
+*.bak
+*.tmp
+*.swp
+*.swo
+
+# Project-specific
+teams_app.zip
+*.zip
+
+.pypirc
+/dist
