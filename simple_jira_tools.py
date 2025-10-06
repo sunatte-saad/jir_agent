@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from jira_client import JiraAgent
 from config import JiraConfig, JiraBehavior
 import requests
-
+import re
 
 # ==============================
 # 🚀 TICKET TOOLS
@@ -58,6 +58,21 @@ class SimpleJiraTicketTools:
                         # Proceed unassigned but inform the caller
                         assignee_account_id = None
 
+            # Resolve epic by fuzzy title if provided and not a key
+            epic_to_use = epic_link
+            epic_resolution_note = ""
+            if epic_link and not re.match(r"^[A-Z]+-\d+$", epic_link.strip(), re.IGNORECASE):
+                # treat as title
+                project = (project_key or "").strip().upper()
+                resolved = self.jira_agent.resolve_epic_key_by_title(project, epic_link)
+                if resolved:
+                    epic_to_use = resolved
+                    epic_resolution_note = f"\n📎 Linked to epic: {resolved} (matched '{epic_link}')"
+                else:
+                    # Epic not found - create ticket without epic link
+                    epic_to_use = None
+                    epic_resolution_note = f"\n⚠️  Epic '{epic_link}' not found in {project}. Ticket created without epic link."
+
             # 🧱 Create ticket
             ticket_key = self.jira_agent.create_ticket(
                 project_key=project_key,
@@ -65,7 +80,7 @@ class SimpleJiraTicketTools:
                 description=description,
                 issue_type=issue_type,
                 assignee=assignee_account_id,
-                epic_link=epic_link,
+                epic_link=epic_to_use,
                 priority=priority,
                 story_points=story_points,
                 assign_to_active_sprint=assign_active_sprint,
@@ -75,7 +90,7 @@ class SimpleJiraTicketTools:
             if ticket_key:
                 ticket_url = f"{self.jira_agent.jira.server_url}/browse/{ticket_key}"
                 assignment_note = " (unassigned; provide accountId to assign)" if assignee and not assignee_account_id else ""
-                return f"✅ Successfully created ticket: {ticket_key}{assignment_note}\n🔗 Ticket URL: {ticket_url}"
+                return f"✅ Successfully created ticket: {ticket_key}{assignment_note}{epic_resolution_note}\n🔗 Ticket URL: {ticket_url}"
             else:
                 return "❌ Failed to create ticket"
         except Exception as e:

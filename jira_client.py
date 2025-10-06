@@ -2,6 +2,7 @@ from jira import JIRA
 from typing import List, Dict, Optional, Any
 import re
 import requests
+import difflib
 from config import JiraConfig, JiraFieldIds, JiraBehavior
 
 class JiraAgent:
@@ -149,34 +150,87 @@ class JiraAgent:
         return None
 
     def list_epics(self, project_key: Optional[str] = None) -> List[Dict[str, Any]]:
-        """List epics in Jira."""
+        """List epics in Jira using REST v3 API."""
         if not self.jira:
             return []
         
         try:
-            jql = "issuetype = Epic"
+            jql = "issuetype = Epic ORDER BY created DESC"
             if project_key:
-                jql += f" AND project = {project_key}"
+                jql = f"project = {project_key} AND issuetype = Epic ORDER BY created DESC"
             
-            epics = self.jira.search_issues(jql, expand='changelog')
+            # Use _rest_search_all helper
+            results = self._rest_search_all(jql, fields=['summary', 'description', 'status', 'assignee', 'reporter', 'created', 'updated', 'project'])
             
-            return [
-                {
-                    'key': epic.key,
-                    'summary': epic.fields.summary,
-                    'description': getattr(epic.fields, 'description', ''),
-                    'status': epic.fields.status.name,
-                    'assignee': getattr(epic.fields.assignee, 'displayName', 'Unassigned') if epic.fields.assignee else 'Unassigned',
-                    'reporter': epic.fields.reporter.displayName,
-                    'created': epic.fields.created,
-                    'updated': epic.fields.updated,
-                    'project': epic.fields.project.key
-                }
-                for epic in epics
-            ]
+            epics = []
+            for issue in results:
+                fields = issue.get('fields', {})
+                assignee = fields.get('assignee')
+                reporter = fields.get('reporter')
+                status = fields.get('status')
+                project = fields.get('project')
+                
+                epics.append({
+                    'key': issue.get('key'),
+                    'summary': fields.get('summary', ''),
+                    'description': fields.get('description', ''),
+                    'status': status.get('name') if status else 'Unknown',
+                    'assignee': assignee.get('displayName', 'Unassigned') if assignee else 'Unassigned',
+                    'reporter': reporter.get('displayName', 'Unknown') if reporter else 'Unknown',
+                    'created': fields.get('created', ''),
+                    'updated': fields.get('updated', ''),
+                    'project': project.get('key') if project else ''
+                })
+            
+            return epics
         except Exception as e:
-            print(f"Error listing epics: {e}")
+            print(f"❌ Error listing epics: {e}")
             return []
+
+    def resolve_epic_key_by_title(self, project_key: str, epic_title: str, min_ratio: float = 0.5) -> Optional[str]:
+        """Resolve an epic key by (approximate) title within a project.
+
+        Uses fuzzy matching to tolerate typos and minor variations.
+        Returns the best matching epic key if similarity >= min_ratio, else None.
+        """
+        try:
+            title_norm = (epic_title or "").strip().lower()
+            if not title_norm:
+                return None
+            epics = self.list_epics(project_key)
+            if not epics:
+                return None
+            
+            # Quick contains match first (bidirectional)
+            for e in epics:
+                epic_title_lower = (e.get('summary') or '').strip().lower()
+                # Check if query is in epic title OR epic title is in query
+                if title_norm in epic_title_lower or epic_title_lower in title_norm:
+                    return e.get('key')
+            
+            # Word-based matching: check if significant words overlap
+            query_words = set(title_norm.split())
+            for e in epics:
+                epic_title_lower = (e.get('summary') or '').strip().lower()
+                epic_words = set(epic_title_lower.split())
+                # If more than 50% of query words are in epic title, it's a match
+                if query_words and len(query_words & epic_words) / len(query_words) >= 0.5:
+                    return e.get('key')
+            
+            # Fuzzy ratio best-match
+            candidates = [(e.get('key'), (e.get('summary') or '').strip()) for e in epics]
+            best_key = None
+            best_ratio = 0.0
+            for key, title in candidates:
+                ratio = difflib.SequenceMatcher(None, title_norm, title.lower()).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_key = key
+            if best_ratio >= min_ratio:
+                return best_key
+            return None
+        except Exception:
+            return None
 
     def create_epic(self, project_key: str, summary: str, description: str = "", 
                    assignee: Optional[str] = None) -> Optional[str]:
@@ -355,6 +409,66 @@ class JiraAgent:
         except Exception as e:
             print(f"❌ Error getting ticket details: {e}")
             return None
+
+    def _rest_search_all(self, jql: str, fields: Optional[List[str]] = None, max_results: int = 100) -> List[Dict[str, Any]]:
+        """
+        Search Jira using REST v3 /rest/api/3/search/jql with pagination.
+        Returns all matching issues as raw JSON dictionaries.
+        
+        Based on: https://developer.atlassian.com/changelog/#CHANGE-2046
+        """
+        server = JiraConfig.JIRA_URL.rstrip('/')
+        url = f"{server}/rest/api/3/search/jql"
+        
+        all_issues: List[Dict[str, Any]] = []
+        next_page_token = None
+        
+        # Default fields if not specified
+        if fields is None:
+            fields = ['summary', 'status', 'assignee', 'project', 'issuetype', 'created', 'updated', 'priority', 'reporter', 'description']
+        
+        while True:
+            # Correct payload format for v3 search/jql endpoint
+            payload = {
+                "jql": jql,
+                "maxResults": max_results,
+                "fieldsByKeys": False,
+                "fields": fields
+            }
+            
+            if next_page_token:
+                payload["pageToken"] = next_page_token
+            
+            try:
+                resp = requests.post(
+                    url,
+                    json=payload,
+                    auth=(JiraConfig.JIRA_EMAIL, JiraConfig.JIRA_API_TOKEN),
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    timeout=30
+                )
+                
+                if resp.status_code != 200:
+                    raise Exception(f"REST search failed: {resp.status_code} {resp.text}")
+                
+                data = resp.json()
+                issues = data.get('issues', [])
+                all_issues.extend(issues)
+                
+                # Check if there are more pages
+                is_last = data.get('isLast', True)
+                if is_last:
+                    break
+                
+                next_page_token = data.get('nextPageToken')
+                if not next_page_token:
+                    break
+                
+            except Exception as e:
+                print(f"❌ Error in _rest_search_all: {e}")
+                break
+        
+        return all_issues
 
     def search_tickets(self, jql: str) -> List[Dict[str, Any]]:
         """Search for tickets using JQL."""

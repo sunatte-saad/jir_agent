@@ -186,6 +186,17 @@ def page_epics() -> None:
         if st.button("List Epics"):
             epics = st.session_state.epic_tools.list_epics(project_key.strip().upper() or None)
             st.markdown(epics)
+        st.write("Search Epics by Title (fuzzy)")
+        epic_title_q = st.text_input("Epic Title contains / approx", key="epic_title_q")
+        if st.button("Search Epic Titles") and (epic_title_q.strip()):
+            # Reuse analytics tool for fuzzy search to avoid changing existing simple tools
+            try:
+                from analytics_tools import AnalyticsTools
+                _at = AnalyticsTools()
+                resp = _at.search_epics_by_title((project_key or '').strip().upper() or None, epic_title_q.strip())
+            except Exception as e:
+                resp = f"❌ Error searching epics: {e}"
+            st.markdown(resp)
     with col2:
         st.write("Create Epic")
         epic_project = st.text_input("Project Key", key="create_epic_project")

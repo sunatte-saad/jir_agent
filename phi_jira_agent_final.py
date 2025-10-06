@@ -9,7 +9,7 @@ from textwrap import dedent
 from config import GeneralConfig
 from simple_jira_tools import SimpleJiraTicketTools, SimpleJiraProjectTools, SimpleJiraEpicTools
 from analytics_tools import AnalyticsTools
-
+import re
 # Create tool instances
 ticket_tools = SimpleJiraTicketTools()
 project_tools = SimpleJiraProjectTools()
@@ -52,9 +52,10 @@ def create_phi_jira_agent(
         epic_tools.get_epic_url,
 
         # Analytics tools
-    #     analytics_tools.assignee_performance_summary,
-    #     analytics_tools.assignee_detail,
-    #     analytics_tools.top_assignees,
+        analytics_tools.assignee_performance_summary,
+        analytics_tools.assignee_detail,
+        analytics_tools.top_assignees,
+        analytics_tools.search_epics_by_title,
      ]
 
     extra_instructions = [
@@ -65,6 +66,11 @@ def create_phi_jira_agent(
         "Always return ticket URLs when creating or referencing tickets.",
         "Handle GDPR strict mode gracefully when user lookup is not available.",
         "For user assignments, try to use names/emails first, but fall back to account IDs if needed.",
+        # Epic handling
+        "IMPORTANT: When users mention an epic by TITLE (e.g., 'Relevant Epic: Twin Connect Quick Capture' or 'Epic: Some Epic Name'), pass the epic TITLE directly to the epic_link parameter.",
+        "The system will automatically find the matching epic key using fuzzy matching, so you don't need to search for it first.",
+        "If the user provides text like 'Relevant Epic: XYZ' or 'Epic: XYZ', extract 'XYZ' and pass it as the epic_link parameter.",
+        "Epic titles are case-insensitive and tolerate minor spelling variations.",
         # Safety rules to avoid unintended edits
         "CRITICAL: If the user intent is to CREATE a ticket, do NOT modify existing tickets. Only call create_ticket or create_deployment_ticket.",
         "Only perform edits, status changes, or assignments when the user explicitly provides a ticket key (e.g., 'PROJ-123') and asks to edit/assign/change.",
@@ -97,6 +103,9 @@ def create_phi_jira_agent(
             "Format responses clearly with proper markdown formatting for better readability.",
             "When user lookup is not available (GDPR strict mode), provide clear guidance on using account IDs.",
             "For assignments, try to use user names or emails first, but be prepared to use account IDs if needed.",
+            # Epic handling
+            "When users provide an epic name/title (not a key like PROJ-123), pass it directly to epic_link - the system handles fuzzy matching automatically.",
+            "Look for patterns like 'Relevant Epic:', 'Epic:', 'Link to epic:', etc. and extract the epic title.",
             # Reinforce safety
             "If the action is 'create', do not call edit_ticket, change_ticket_status, or assign_ticket."
         ],
@@ -135,14 +144,16 @@ def create_phi_jira_agent(
             **🚀 What I can do:**
             - Create and manage tickets (Tasks, Bugs, Stories, etc.)
             - Assign tickets to team members by name or email (when available)
+            - Link tickets to epics using epic titles (no need for epic keys!)
             - Change ticket statuses and priorities
             - Create and organize epics
             - List projects and users
-            - Search tickets with JQL queries
+            - Search tickets and epics with JQL queries
             - **All operations return direct links automatically**
             - Edit ticket details and descriptions
 
             **💡 Example requests:**
+            - "Create a task in DS project, assign to wajeiha, link to epic 'Twin Connect Quick Capture'"
             - "Create a new bug ticket in project HC titled 'Login issue' and assign it to saad@teamsolve.com"
             - "Assign ticket HC-123 to saad@teamsolve.com"
             - "Change ticket HC-123 status to 'In Progress'"
@@ -153,6 +164,7 @@ def create_phi_jira_agent(
 
             **✨ Features:**
             - Assign tickets by user names or emails (when user lookup is available)
+            - Link tickets to epics using epic TITLES with fuzzy matching (tolerates typos!)
             - All operations automatically return ticket/epic URLs
             - Smart user name resolution
             - Handles GDPR strict mode gracefully

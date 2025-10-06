@@ -2,6 +2,8 @@ from typing import Optional, Dict, Any
 from phi.tools import Toolkit
 from jira_client import JiraAgent
 from analytics import JiraAnalytics
+import difflib
+import re
 
 
 class AnalyticsTools(Toolkit):
@@ -14,6 +16,32 @@ class AnalyticsTools(Toolkit):
         super().__init__(name="analytics_tools")
         self.jira_agent = JiraAgent()
         self.analytics = JiraAnalytics(self.jira_agent)
+
+    # ---------- Epic title search ----------
+    def search_epics_by_title(self, project_key: Optional[str], title_query: str, limit: int = 10) -> str:
+        """Search epics by (fuzzy) title within a project; returns best matches with keys and summaries."""
+        try:
+            if not title_query or not title_query.strip():
+                return "❌ Provide a non-empty title query"
+            project = (project_key or "").strip().upper() or None
+            epics = self.jira_agent.list_epics(project)
+            if not epics:
+                return f"No epics found{' in ' + project if project else ''}"
+            q = title_query.strip().lower()
+            scored = []
+            for e in epics:
+                title = (e.get('summary') or '').strip()
+                ratio = difflib.SequenceMatcher(None, q, title.lower()).ratio()
+                contains = 1.0 if q in title.lower() else 0.0
+                score = max(ratio, contains)
+                scored.append((score, e.get('key'), title))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            out = [f"**Epic matches for '{title_query}':**"]
+            for score, key, title in scored[: max(1, int(limit))]:
+                out.append(f"- {key}: {title} (score {score:.2f})")
+            return "\n".join(out)
+        except Exception as e:
+            return f"❌ Error searching epics: {str(e)}"
 
     def assignee_performance_summary(self, min_tickets: int = 1, limit: int = 25) -> str:
         """Summary per assignee: total, resolved, avg_days, resolution_rate (top N)."""

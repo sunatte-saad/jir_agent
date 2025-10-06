@@ -32,7 +32,9 @@ A comprehensive AI-powered agent for automating Jira project management tasks in
 #### Epic Operations
 - Create epics
 - List epics (system-wide or project-specific)
-- Link tickets to epics
+- Search epics by title with fuzzy matching
+- Link tickets to epics using **epic titles** (no need for epic keys!)
+- Automatic epic resolution with word-based and fuzzy matching
 - Get epic URLs
 
 ## Installation
@@ -76,9 +78,21 @@ from phi_jira_agent_final import get_phi_jira_agent
 agent = get_phi_jira_agent()
 
 # Use the agent
-response = agent.run("List all projects",stream=False)
+response = agent.run("List all projects", stream=False)
+print(response)
+
+# Create a ticket with epic title (automatic resolution!)
+response = agent.run("""
+Create a task in DS project and assign to wajeiha:
+Title: Update Health & Safety Form
+Description: Add new fields to the form
+Story Points: 2
+Relevant Epic: Twin Connect Quick Capture
+""", stream=False)
 print(response)
 ```
+
+**Note**: When providing epic names, the system automatically finds the matching epic using fuzzy matching. You don't need to know the exact epic key!
 
 ### Interactive Mode
 
