@@ -9,7 +9,6 @@ from textwrap import dedent
 from config import GeneralConfig
 from simple_jira_tools import SimpleJiraTicketTools, SimpleJiraProjectTools, SimpleJiraEpicTools
 from analytics_tools import AnalyticsTools
-import re
 # Create tool instances
 ticket_tools = SimpleJiraTicketTools()
 project_tools = SimpleJiraProjectTools()
@@ -66,16 +65,51 @@ def create_phi_jira_agent(
         "Always return ticket URLs when creating or referencing tickets.",
         "Handle GDPR strict mode gracefully when user lookup is not available.",
         "For user assignments, try to use names/emails first, but fall back to account IDs if needed.",
+        
+        # Data Extraction for Deployment Tickets
+        "DEPLOYMENT TICKET EXTRACTION: When users request deployment tickets, extract:",
+        "- Branch name",
+        "- PR Link",
+        "- Deployment instructions",
+        "- Referenced Dev Ticket(s) - REQUIRED (e.g., FIJI-210, DS-123)",
+        "- QA contacts / QA Instructions",
+        "- The deployment ticket MUST be created in the SAME project as the referenced dev ticket",
+        "- Naming convention: (PROJECT) Deployment ticket for <DEV-TICKET> - this is automatically handled",
+        
+        # Data Extraction for Task Tickets
+        "TASK TICKET EXTRACTION: When users request task creation, extract:",
+        "- Client Name (used to map to Jira project key)",
+        "- Ticket Title (summary)",
+        "- Description",
+        "- Story Points (if mentioned)",
+        "- Relevant Epic (title or key)",
+        "- Assignee: EITHER the message sender OR the person explicitly mentioned to be assigned",
+        
         # Epic handling
         "IMPORTANT: When users mention an epic by TITLE (e.g., 'Relevant Epic: Twin Connect Quick Capture' or 'Epic: Some Epic Name'), pass the epic TITLE directly to the epic_link parameter.",
         "The system will automatically find the matching epic key using fuzzy matching, so you don't need to search for it first.",
         "If the user provides text like 'Relevant Epic: XYZ' or 'Epic: XYZ', extract 'XYZ' and pass it as the epic_link parameter.",
         "Epic titles are case-insensitive and tolerate minor spelling variations.",
+        "The epic 'Bugs and Configuration' is automatically found or created for deployment tickets using partial matching.",
+        
+        # Ticket Creation Behavior
+        "ALL tickets (both deployment and task) are automatically:",
+        "- Set to 'To Do' status after creation",
+        "- Added to the active sprint of their project",
+        "- Linked to their epic (if specified)",
+        
         # Safety rules to avoid unintended edits
         "CRITICAL: If the user intent is to CREATE a ticket, do NOT modify existing tickets. Only call create_ticket or create_deployment_ticket.",
         "Only perform edits, status changes, or assignments when the user explicitly provides a ticket key (e.g., 'PROJ-123') and asks to edit/assign/change.",
         "Never infer or reuse a ticket key from prior context for modification. If no explicit key is given, ask for clarification instead of modifying anything.",
-        "After a successful creation, always surface the NEW ticket key and URL."
+        "After a successful creation, always surface the NEW ticket key and URL.",
+        
+        # Confirmation Messages
+        "After creating a deployment ticket, always mention:",
+        "- The ticket key and URL",
+        "- That it was added to the active sprint",
+        "- That it's linked to the dev ticket(s)",
+        "- The requester (if known)"
     ]
 
     # Create LLM model if not provided
@@ -143,6 +177,7 @@ def create_phi_jira_agent(
 
             **🚀 What I can do:**
             - Create and manage tickets (Tasks, Bugs, Stories, etc.)
+            - Create deployment tickets with automatic project detection
             - Assign tickets to team members by name or email (when available)
             - Link tickets to epics using epic titles (no need for epic keys!)
             - Change ticket statuses and priorities
@@ -162,7 +197,12 @@ def create_phi_jira_agent(
             - "Create an epic and assign it to saad@teamsolve.com"
             - "Create a deployment ticket for FIJI-817 with PR link <url> and assign to Naqash"
 
-            **✨ Features:**
+            **✨ New Features:**
+            - Deployment tickets automatically created in the same project as the dev ticket
+            - Smart epic matching with partial name recognition (e.g., '(BBG) Bugs and Configuration')
+            - All tickets automatically added to active sprint
+            - All tickets automatically set to 'To Do' status
+            - Standard naming convention for deployment tickets: (PROJECT) Deployment ticket for <DEV-TICKET>
             - Assign tickets by user names or emails (when user lookup is available)
             - Link tickets to epics using epic TITLES with fuzzy matching (tolerates typos!)
             - All operations automatically return ticket/epic URLs

@@ -28,8 +28,8 @@ class JiraFieldIds:
 
 class JiraBehavior:
     """Default behaviors for ticket creation and deployment handling."""
-    DEPLOYMENT_EPIC_NAME = os.environ.get("JIRA_DEPLOYMENT_EPIC_NAME", "Bugs and Configurations")
-    DEPLOYMENT_DEFAULT_STATUS = os.environ.get("JIRA_DEPLOYMENT_DEFAULT_STATUS", "Ready to Deploy")
+    DEPLOYMENT_EPIC_NAME = os.environ.get("JIRA_DEPLOYMENT_EPIC_NAME", "Bugs and Configuration")
+    DEPLOYMENT_DEFAULT_STATUS = os.environ.get("JIRA_DEPLOYMENT_DEFAULT_STATUS", "To Do")
     TASK_DEFAULT_STATUS = os.environ.get("JIRA_TASK_DEFAULT_STATUS", "To Do")
     DEFAULT_LINK_TYPE = os.environ.get("JIRA_DEFAULT_LINK_TYPE", "Relates")
 

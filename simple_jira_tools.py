@@ -30,7 +30,7 @@ class SimpleJiraTicketTools:
         story_points: Optional[float] = None,
         sprint: Optional[str] = None,
         status: Optional[str] = None,
-        assign_active_sprint: bool = False,
+        assign_active_sprint: bool = True,  # Changed default to True to ensure sprint assignment
     ) -> str:
         """Create a new ticket in Jira."""
         try:
@@ -74,6 +74,9 @@ class SimpleJiraTicketTools:
                     epic_resolution_note = f"\n⚠️  Epic '{epic_link}' not found in {project}. Ticket created without epic link."
 
             # 🧱 Create ticket
+            # Use "To Do" as default status if not provided
+            final_status = status if status else JiraBehavior.TASK_DEFAULT_STATUS
+            
             ticket_key = self.jira_agent.create_ticket(
                 project_key=project_key,
                 summary=summary,
@@ -84,7 +87,7 @@ class SimpleJiraTicketTools:
                 priority=priority,
                 story_points=story_points,
                 assign_to_active_sprint=assign_active_sprint,
-                desired_status=status,
+                desired_status=final_status,
             )
 
             if ticket_key:
@@ -148,8 +151,9 @@ class SimpleJiraTicketTools:
                 return (
                     f"✅ Successfully created deployment ticket: {ticket_key}\n"
                     f"🔗 Ticket URL: {ticket_url}\n"
-                    f"📌 Epic: {JiraBehavior.DEPLOYMENT_EPIC_NAME}\n"
-                    f"🔁 Status: {JiraBehavior.DEPLOYMENT_DEFAULT_STATUS}"
+                    f"📌 Epic: Bugs and Configuration (project-specific)\n"
+                    f"🔁 Status: {JiraBehavior.TASK_DEFAULT_STATUS}\n"
+                    f"📋 Added to active sprint in the same project as the dev ticket"
                 )
             else:
                 return "❌ Failed to create deployment ticket"

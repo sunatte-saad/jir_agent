@@ -546,20 +546,63 @@ class JiraAgent:
     # Sprint and Linking Helpers
     # ==============================
     def get_active_sprint(self, project_key: str) -> Optional[Dict[str, Any]]:
-        """Find the active sprint for the project's first Scrum board."""
+        """Find the active sprint for the project's board.
+        
+        Searches for a board that belongs to the specified project and returns its active sprint.
+        """
         if not self.jira:
             return None
         try:
-            boards = self.jira.boards(type='scrum')
-            board_list = boards or []
-            if not board_list:
-                boards = self.jira.boards()
-                board_list = boards or []
-            if not board_list:
+            # Try to find boards for this specific project
+            all_boards = self.jira.boards()
+            project_boards = []
+            
+            for board in all_boards:
+                try:
+                    # Check if board belongs to this project by name matching
+                    # Note: board details API may not be available in all Jira instances
+                    if project_key.upper() in board.name.upper():
+                        # Verify this board has the project
+                        try:
+                            # Get issues from board to verify project
+                            issues = self.jira.search_issues(
+                                f"project = {project_key} AND Sprint is not EMPTY",
+                                maxResults=1
+                            )
+                            if issues:
+                                project_boards.append(board)
+                        except Exception:
+                            # If search fails, use name matching
+                            if project_key.upper() in board.name.upper():
+                                project_boards.append(board)
+                except Exception:
+                    continue
+            
+            # If no project-specific boards found, try all scrum boards
+            if not project_boards:
+                scrum_boards = self.jira.boards(type='scrum')
+                project_boards = list(scrum_boards) if scrum_boards else []
+            
+            # If still no boards, use all boards
+            if not project_boards:
+                project_boards = list(all_boards) if all_boards else []
+            
+            if not project_boards:
+                print(f"⚠️  No boards found for project {project_key}")
                 return None
-            board = board_list[0]
-            sprints = self.jira.sprints(board.id, state='active')
-            return sprints[0].raw if sprints else None
+            
+            # Try to find active sprint in project boards
+            for board in project_boards:
+                try:
+                    sprints = self.jira.sprints(board.id, state='active')
+                    if sprints:
+                        print(f"✅ Found active sprint '{sprints[0].name}' in board '{board.name}' for project {project_key}")
+                        return sprints[0].raw
+                except Exception as e:
+                    continue
+            
+            print(f"⚠️  No active sprint found for project {project_key}")
+            return None
         except Exception as e:
             print(f"⚠️  Error fetching active sprint for {project_key}: {e}")
             return None
@@ -597,16 +640,41 @@ class JiraAgent:
             return False
 
     def find_or_create_deployment_epic(self, project_key: str) -> Optional[str]:
-        """Find the 'Bugs and Configurations' epic in the project or create it."""
+        """Find the 'Bugs and Configurations' epic in the project or create it.
+        
+        Uses partial matching to find existing epics like:
+        - 'Bugs and Configuration'
+        - '(PROJECT) Bugs and Configuration'
+        - 'Bugs and Configuration Overflow'
+        """
         try:
             epics = self.list_epics(project_key)
+            target_name = JiraBehavior.DEPLOYMENT_EPIC_NAME.strip().lower()
+            
+            # First pass: Look for exact match
             for epic in epics:
-                if epic.get('summary', '').strip().lower() == JiraBehavior.DEPLOYMENT_EPIC_NAME.strip().lower():
+                epic_summary = epic.get('summary', '').strip().lower()
+                if epic_summary == target_name:
                     return epic['key']
-            # Not found, create it
+            
+            # Second pass: Look for partial matches (must contain key words)
+            # Extract key words from target (e.g., "bugs", "configuration")
+            target_words = set(w for w in target_name.split() if len(w) > 3)
+            
+            for epic in epics:
+                epic_summary = epic.get('summary', '').strip().lower()
+                epic_words = set(w for w in epic_summary.split() if len(w) > 3)
+                
+                # If epic contains all key words from target, it's a match
+                if target_words and target_words.issubset(epic_words):
+                    print(f"✅ Found matching epic by partial match: {epic['key']} - '{epic.get('summary')}'")
+                    return epic['key']
+            
+            # Not found, create it with project prefix
+            epic_summary = f"({project_key}) {JiraBehavior.DEPLOYMENT_EPIC_NAME}"
             epic_key = self.create_epic(
                 project_key=project_key,
-                summary=JiraBehavior.DEPLOYMENT_EPIC_NAME,
+                summary=epic_summary,
                 description=f"Auto-created epic for deployment & configuration tickets in {project_key}"
             )
             return epic_key
@@ -627,17 +695,33 @@ class JiraAgent:
         qa_instructions: Optional[str] = None,
         story_points: Optional[float] = None,
     ) -> Optional[str]:
-        """Create a deployment ticket with defaults, links to dev tickets, epic, sprint, and status."""
+        """Create a deployment ticket with defaults, links to dev tickets, epic, sprint, and status.
+        
+        The deployment ticket is created in the same project as the referenced dev ticket.
+        Naming convention: (PROJECT) Deployment ticket for <DEV-TICKET>
+        """
         if not self.jira:
             return None
         try:
-            # Derive title if needed
+            # Derive project from the first dev ticket if not provided or to ensure consistency
+            actual_project_key = project_key
+            if dev_ticket_keys:
+                try:
+                    # Get the project from the first dev ticket
+                    first_dev_ticket = self.jira.issue(dev_ticket_keys[0])
+                    actual_project_key = first_dev_ticket.fields.project.key
+                    print(f"✅ Using project {actual_project_key} from dev ticket {dev_ticket_keys[0]}")
+                except Exception as e:
+                    print(f"⚠️  Could not fetch dev ticket project, using provided project: {e}")
+            
+            # Derive title following standard naming convention
             if not summary:
-                joined = ", ".join(dev_ticket_keys)
-                summary = f"Deployment ticket for {joined}"
+                # Standard format: (PROJECT) Deployment ticket for DEV-TICKET
+                dev_tickets_str = ", ".join(dev_ticket_keys) if len(dev_ticket_keys) > 1 else dev_ticket_keys[0]
+                summary = f"({actual_project_key}) Deployment ticket for {dev_tickets_str}"
 
-            # Ensure epic
-            epic_key = self.find_or_create_deployment_epic(project_key)
+            # Ensure epic in the correct project
+            epic_key = self.find_or_create_deployment_epic(actual_project_key)
 
             # Build description with references
             desc_parts = []
@@ -655,9 +739,9 @@ class JiraAgent:
                 desc_parts.append(f"Related development tickets:\n{links}")
             full_description = "\n\n".join([p for p in desc_parts if p])
 
-            # Create ticket with defaults
+            # Create ticket with defaults - use actual_project_key to ensure correct sprint
             ticket_key = self.create_ticket(
-                project_key=project_key,
+                project_key=actual_project_key,
                 summary=summary,
                 description=full_description,
                 issue_type="Task",
